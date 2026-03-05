@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ./orchestrator
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - ENVIRONMENT=development
+
+  agent:
+    build:
+      context: ./agent
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-dummy}
+
+  bot:
+    build:
+      context: ./bot
+    ports:
+      - "3000:3000"
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-dummy}
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-dummy}
+      - ORCHESTRATOR_URL=http://orchestrator:8080
+      - AGENT_URL=http://agent:8000
+    depends_on:
+      - orchestrator
+      - agent

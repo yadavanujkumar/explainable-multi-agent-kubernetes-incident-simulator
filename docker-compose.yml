@@ -1,5 +1,9 @@
 version: '3.8'
 
+networks:
+  simulator-net:
+    driver: bridge
+
 services:
   orchestrator:
     build:
@@ -9,6 +13,16 @@ services:
     environment:
       - PORT=8080
       - ENVIRONMENT=development
+      - APP_VERSION=${APP_VERSION:-dev}
+    restart: unless-stopped
+    networks:
+      - simulator-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   agent:
     build:
@@ -17,6 +31,16 @@ services:
       - "8000:8000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-dummy}
+      - APP_VERSION=${APP_VERSION:-dev}
+    restart: unless-stopped
+    networks:
+      - simulator-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx, sys; sys.exit(0 if httpx.get('http://localhost:8000/healthz').status_code == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   bot:
     build:
@@ -28,6 +52,12 @@ services:
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-dummy}
       - ORCHESTRATOR_URL=http://orchestrator:8080
       - AGENT_URL=http://agent:8000
+      - PORT=3000
+    restart: unless-stopped
+    networks:
+      - simulator-net
     depends_on:
-      - orchestrator
-      - agent
+      orchestrator:
+        condition: service_healthy
+      agent:
+        condition: service_healthy

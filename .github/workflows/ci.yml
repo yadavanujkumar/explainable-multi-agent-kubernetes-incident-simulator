@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Go Orchestrator — lint, test, build
+  # ─────────────────────────────────────────────
+  orchestrator:
+    name: Orchestrator (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: orchestrator
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: orchestrator/coverage.out
+          flags: orchestrator
+
+      - name: Build binary
+        run: go build -v -o bin/orchestrator .
+
+  # ─────────────────────────────────────────────
+  # Python XAI Agent — lint, test, build
+  # ─────────────────────────────────────────────
+  agent:
+    name: XAI Agent (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: agent/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Ruff lint
+        run: pip install ruff && ruff check .
+
+      - name: Run tests with coverage
+        env:
+          OPENAI_API_KEY: "dummy-key-for-tests"
+        run: |
+          pip install pytest pytest-cov pytest-asyncio httpx
+          pytest tests/ -v --cov=. --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: agent/coverage.xml
+          flags: agent
+
+  # ─────────────────────────────────────────────
+  # TypeScript Bot — lint, test, build
+  # ─────────────────────────────────────────────
+  bot:
+    name: Slack Bot (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Run ESLint
+        run: npx eslint "src/**/*.ts" "tests/**/*.ts"
+
+      - name: Run tests with coverage
+        run: npm test -- --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: bot/coverage/lcov.info
+          flags: bot
+
+      - name: Build
+        run: npm run build
+
+  # ─────────────────────────────────────────────
+  # Docker — build all images
+  # ─────────────────────────────────────────────
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [orchestrator, agent, bot]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build orchestrator image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./orchestrator
+          push: false
+          tags: k8s-simulator/orchestrator:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./agent
+          push: false
+          tags: k8s-simulator/agent:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build bot image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./bot
+          push: false
+          tags: k8s-simulator/bot:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

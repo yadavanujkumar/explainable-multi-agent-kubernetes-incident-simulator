@@ -1,5 +1,6 @@
 terraform {
   required_version = ">= 1.6.0"
+
   required_providers {
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -10,6 +11,15 @@ terraform {
       version = "~> 2.13"
     }
   }
+
+  # Uncomment and configure for remote state in production:
+  # backend "s3" {
+  #   bucket         = "my-terraform-state-bucket"
+  #   key            = "k8s-simulator/terraform.tfstate"
+  #   region         = "us-east-1"
+  #   encrypt        = true
+  #   dynamodb_table = "terraform-state-lock"
+  # }
 }
 
 # ─────────────────────────────────────────────
@@ -38,6 +48,54 @@ variable "k3s_image" {
   description = "k3s image used inside each vcluster."
   type        = string
   default     = "rancher/k3s:v1.29.4-k3s1"
+}
+
+variable "orchestrator_replicas" {
+  description = "Number of Orchestrator pod replicas."
+  type        = number
+  default     = 2
+}
+
+variable "max_vclusters_per_namespace" {
+  description = "Maximum number of concurrent vcluster pods allowed in the simulator namespace."
+  type        = number
+  default     = 20
+}
+
+variable "quota_cpu_requests" {
+  description = "Total CPU requests allowed in the simulator namespace."
+  type        = string
+  default     = "20"
+}
+
+variable "quota_cpu_limits" {
+  description = "Total CPU limits allowed in the simulator namespace."
+  type        = string
+  default     = "40"
+}
+
+variable "quota_memory_requests" {
+  description = "Total memory requests allowed in the simulator namespace."
+  type        = string
+  default     = "40Gi"
+}
+
+variable "quota_memory_limits" {
+  description = "Total memory limits allowed in the simulator namespace."
+  type        = string
+  default     = "80Gi"
+}
+
+variable "quota_storage_requests" {
+  description = "Total persistent storage requests allowed in the simulator namespace."
+  type        = string
+  default     = "100Gi"
+}
+
+variable "quota_pvc_count" {
+  description = "Maximum number of PersistentVolumeClaims in the simulator namespace."
+  type        = number
+  default     = 50
 }
 
 # ─────────────────────────────────────────────
@@ -153,6 +211,87 @@ resource "kubernetes_network_policy" "default_deny" {
   }
 }
 
+resource "kubernetes_network_policy" "allow_intra_namespace" {
+  metadata {
+    name      = "allow-intra-namespace"
+    namespace = kubernetes_namespace.simulator_system.metadata[0].name
+  }
+  spec {
+    pod_selector {}
+    policy_types = ["Ingress"]
+    ingress {
+      from {
+        namespace_selector {
+          match_labels = {
+            "kubernetes.io/metadata.name" = var.simulator_namespace
+          }
+        }
+      }
+    }
+  }
+}
+
+# ─────────────────────────────────────────────
+# ResourceQuota – prevent runaway resource usage
+# ─────────────────────────────────────────────
+
+resource "kubernetes_resource_quota" "simulator_system" {
+  metadata {
+    name      = "simulator-system-quota"
+    namespace = kubernetes_namespace.simulator_system.metadata[0].name
+  }
+  spec {
+    hard = {
+      pods                     = tostring(var.max_vclusters_per_namespace + 10)
+      "requests.cpu"           = var.quota_cpu_requests
+      "requests.memory"        = var.quota_memory_requests
+      "limits.cpu"             = var.quota_cpu_limits
+      "limits.memory"          = var.quota_memory_limits
+      "requests.storage"       = var.quota_storage_requests
+      "persistentvolumeclaims" = tostring(var.quota_pvc_count)
+    }
+  }
+}
+
+# ─────────────────────────────────────────────
+# LimitRange – enforce sane container defaults
+# ─────────────────────────────────────────────
+
+resource "kubernetes_limit_range" "simulator_system" {
+  metadata {
+    name      = "simulator-system-limits"
+    namespace = kubernetes_namespace.simulator_system.metadata[0].name
+  }
+  spec {
+    limit {
+      type = "Container"
+      default = {
+        cpu    = "500m"
+        memory = "512Mi"
+      }
+      default_request = {
+        cpu    = "100m"
+        memory = "128Mi"
+      }
+      max = {
+        cpu    = "4"
+        memory = "8Gi"
+      }
+      min = {
+        cpu    = "10m"
+        memory = "32Mi"
+      }
+    }
+    limit {
+      type = "Pod"
+      max = {
+        cpu    = "8"
+        memory = "16Gi"
+      }
+    }
+  }
+}
+
 # ─────────────────────────────────────────────
 # Outputs
 # ─────────────────────────────────────────────
@@ -165,4 +304,9 @@ output "simulator_namespace" {
 output "orchestrator_service_account" {
   description = "ServiceAccount used by the Orchestrator."
   value       = kubernetes_service_account.orchestrator.metadata[0].name
+}
+
+output "resource_quota_name" {
+  description = "Name of the ResourceQuota applied to the simulator namespace."
+  value       = kubernetes_resource_quota.simulator_system.metadata[0].name
 }

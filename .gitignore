@@ -25,6 +25,7 @@ htmlcov/
 bin/
 *.exe
 *.test
+orchestrator/simulator-orchestrator
 
 ## Secrets & environment
 .env

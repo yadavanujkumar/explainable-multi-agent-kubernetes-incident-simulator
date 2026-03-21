@@ -1,0 +1,32 @@
+# Example Terraform variables for the K8s Incident Simulator infrastructure.
+# Copy this file to terraform.tfvars and fill in your values.
+
+# Path to the kubeconfig for the host cluster.
+# kubeconfig_path = "~/.kube/config"
+
+# Kubernetes namespace for the simulator platform.
+# simulator_namespace = "simulator-system"
+
+# Loft vcluster Helm chart version.
+# vcluster_chart_version = "0.19.2"
+
+# k3s image used inside each vcluster.
+# k3s_image = "rancher/k3s:v1.29.4-k3s1"
+
+# Number of Orchestrator pod replicas (≥ 2 recommended for HA).
+# orchestrator_replicas = 2
+
+# Maximum number of concurrent vcluster pods allowed per namespace.
+# max_vclusters_per_namespace = 20
+
+# ResourceQuota: total CPU requests / limits across all pods in the namespace.
+# quota_cpu_requests  = "20"
+# quota_cpu_limits    = "40"
+
+# ResourceQuota: total memory requests / limits.
+# quota_memory_requests = "40Gi"
+# quota_memory_limits   = "80Gi"
+
+# ResourceQuota: total persistent storage requests and PVC count.
+# quota_storage_requests = "100Gi"
+# quota_pvc_count        = 50
